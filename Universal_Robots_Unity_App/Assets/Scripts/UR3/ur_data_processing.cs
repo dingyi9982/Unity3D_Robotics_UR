@@ -187,7 +187,7 @@ public class ur_data_processing : MonoBehaviour
         }
         catch (Exception e)
         {
-            Debug.Log("Application Quit Exception:" + e);
+            Debug.LogWarning("Application Quit Exception:" + e);
         }
     }
 
@@ -201,16 +201,8 @@ public class ur_data_processing : MonoBehaviour
         private TcpClient tcp_client = new TcpClient();
         private NetworkStream network_stream = null;
         //  Packet Buffer (Read)
-        private byte[] packet = new byte[1116];
-
-        // Offset:
-        //  Size of first packet in bytes (Integer)
-        private const byte first_packet_size = 4;
-        //  Size of other packets in bytes (Double)
-        private const byte offset = 8;
-
-        // Total message length in bytes
-        private const UInt32 total_msg_length = 3288596480;
+        private byte[] packet = new byte[2 + 6 * 8];
+		private const UInt16 total_msg_length = 6;
 
         public void UR_Stream_Thread()
         {
@@ -233,31 +225,26 @@ public class ur_data_processing : MonoBehaviour
                     // Get the data from the robot
                     if (network_stream.Read(packet, 0, packet.Length) != 0)
                     {
-                        if (BitConverter.ToUInt32(packet, first_packet_size - 4) == total_msg_length)
+                        if (BitConverter.ToUInt16(packet, 0) == total_msg_length)
                         {
                             // t_{0}: Timer start.
                             t.Start();
 
-                            // Reverses the order of elements in a one-dimensional array or part of an array.
-                            Array.Reverse(packet);
-
                             // Note:
                             //  For more information on values 32... 37, etc., see the UR Client Interface document.
                             // Read Joint Values in radians
-                            UR_Stream_Data.J_Orientation[0] = BitConverter.ToDouble(packet, packet.Length - first_packet_size - (32 * offset));
-                            UR_Stream_Data.J_Orientation[1] = BitConverter.ToDouble(packet, packet.Length - first_packet_size - (33 * offset));
-                            UR_Stream_Data.J_Orientation[2] = BitConverter.ToDouble(packet, packet.Length - first_packet_size - (34 * offset));
-                            UR_Stream_Data.J_Orientation[3] = BitConverter.ToDouble(packet, packet.Length - first_packet_size - (35 * offset));
-                            UR_Stream_Data.J_Orientation[4] = BitConverter.ToDouble(packet, packet.Length - first_packet_size - (36 * offset));
-                            UR_Stream_Data.J_Orientation[5] = BitConverter.ToDouble(packet, packet.Length - first_packet_size - (37 * offset));
-                            // Read Cartesian (Positon) Values in metres
-                            UR_Stream_Data.C_Position[0] = BitConverter.ToDouble(packet, packet.Length - first_packet_size - (56 * offset));
-                            UR_Stream_Data.C_Position[1] = BitConverter.ToDouble(packet, packet.Length - first_packet_size - (57 * offset));
-                            UR_Stream_Data.C_Position[2] = BitConverter.ToDouble(packet, packet.Length - first_packet_size - (58 * offset));
-                            // Read Cartesian (Orientation) Values in metres 
-                            UR_Stream_Data.C_Orientation[0] = BitConverter.ToDouble(packet, packet.Length - first_packet_size - (59 * offset));
-                            UR_Stream_Data.C_Orientation[1] = BitConverter.ToDouble(packet, packet.Length - first_packet_size - (60 * offset));
-                            UR_Stream_Data.C_Orientation[2] = BitConverter.ToDouble(packet, packet.Length - first_packet_size - (61 * offset));
+                            int startIndex = 2;
+                            UR_Stream_Data.J_Orientation[0] = BitConverter.ToDouble(packet, startIndex);
+                            startIndex += 8;
+                            UR_Stream_Data.J_Orientation[1] = BitConverter.ToDouble(packet, startIndex);
+                            startIndex += 8;
+                            UR_Stream_Data.J_Orientation[2] = BitConverter.ToDouble(packet, startIndex);
+                            startIndex += 8;
+                            UR_Stream_Data.J_Orientation[3] = BitConverter.ToDouble(packet, startIndex);
+                            startIndex += 8;
+                            UR_Stream_Data.J_Orientation[4] = BitConverter.ToDouble(packet, startIndex);
+                            startIndex += 8;
+                            UR_Stream_Data.J_Orientation[5] = BitConverter.ToDouble(packet, startIndex);
 
                             // t_{1}: Timer stop.
                             t.Stop();
@@ -270,9 +257,16 @@ public class ur_data_processing : MonoBehaviour
 
                             // Reset (Restart) timer.
                             t.Restart();
+                        } else
+                        {
+                            Debug.LogWarning("Received invalid msg length: " + BitConverter.ToUInt16(packet, 0));
                         }
+                    } else
+                    {
+                        Debug.LogWarning("Read data from robot failed");
                     }
                 }
+                Debug.Log("UR Stream Thread exits");
             }
             catch (SocketException e)
             {
@@ -295,11 +289,17 @@ public class ur_data_processing : MonoBehaviour
         {
             // Stop and exit thread
             exit_thread = true;
+            if (tcp_client.Connected == true)
+            {
+                tcp_client.Close();
+                tcp_client.Dispose();
+                tcp_client = new TcpClient();
+            }
             if (robot_thread.IsAlive == true)
             {
                 Thread.Sleep(100);
-                UR_Stream_Data.is_alive = false;
             }
+            UR_Stream_Data.is_alive = false;
         }
         public void Destroy()
         {
@@ -308,6 +308,7 @@ public class ur_data_processing : MonoBehaviour
                 // Disconnect communication
                 network_stream.Dispose();
                 tcp_client.Close();
+                tcp_client.Dispose();
             }
             Thread.Sleep(100);
         }
@@ -366,10 +367,11 @@ public class ur_data_processing : MonoBehaviour
                     // Reset (Restart) timer.
                     t.Restart();
                 }
+                Debug.Log("UR Control Thread exits");
             }
             catch (SocketException e)
             {
-                Debug.Log("Socket Exception:" + e);
+                Debug.LogWarning("Socket Exception:" + e);
             }
         }
 
@@ -388,12 +390,18 @@ public class ur_data_processing : MonoBehaviour
         {
             // Stop and exit thread
             exit_thread = true;
+            if (tcp_client.Connected == true)
+            {
+                tcp_client.Close();
+                tcp_client.Dispose();
+                tcp_client = new TcpClient();
+            }
             if (robot_thread.IsAlive == true)
             {
                 // Disconnect communication
                 Thread.Sleep(100);
-                UR_Control_Data.is_alive = false;
             }
+            UR_Control_Data.is_alive = false;
         }
         public void Destroy()
         {
@@ -402,6 +410,7 @@ public class ur_data_processing : MonoBehaviour
                 // Disconnect communication
                 network_stream.Dispose();
                 tcp_client.Close();
+                tcp_client.Dispose();
             }
             Thread.Sleep(100);
         }
